@@ -115,6 +115,11 @@
     <artifactId>gt-arcgrid</artifactId>
   </dependency>
   <dependency>
+      <groupId>org.geotools</groupId>
+      <artifactId>gt-vpf</artifactId>
+      <version>21-SNAPSHOT</version>
+  </dependency>
+  <dependency>
     <groupId>org.geotools</groupId>
     <artifactId>gt-geotiff</artifactId>
   </dependency>
