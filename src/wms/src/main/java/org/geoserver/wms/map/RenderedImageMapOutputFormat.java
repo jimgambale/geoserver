@@ -9,6 +9,7 @@ import it.geosolutions.jaiext.lookup.LookupTable;
 import it.geosolutions.jaiext.lookup.LookupTableFactory;
 import it.geosolutions.jaiext.range.Range;
 import it.geosolutions.jaiext.vectorbin.ROIGeometry;
+import it.geosolutions.rendered.viewer.RenderedImageBrowser;
 import java.awt.*;
 import java.awt.geom.AffineTransform;
 import java.awt.image.BufferedImage;
@@ -156,6 +157,16 @@ public class RenderedImageMapOutputFormat extends AbstractMapOutputFormat {
     private static final String MAP_WRAPPING_FORMAT_OPTION = "mapWrapping";
     private static final String ADV_PROJECTION_HANDLING_FORMAT_OPTION =
             "advancedProjectionHandling";
+    private static final String ADV_PROJECTION_DENSIFICATION_FORMAT_OPTION =
+            "advancedProjectionHandlingDensification";
+    private static final String DISABLE_DATELINE_WRAPPING_HEURISTIC_FORMAT_OPTION =
+            "disableDatelineWrappingHeuristic";
+
+    /** Disable Gutter key */
+    public static final String DISABLE_GUTTER_KEY = "wms.raster.disableGutter";
+
+    /** Disable Gutter */
+    private static Boolean DISABLE_GUTTER = Boolean.getBoolean(DISABLE_GUTTER_KEY);
 
     /** The size of a megabyte */
     private static final int KB = 1024;
@@ -201,7 +212,7 @@ public class RenderedImageMapOutputFormat extends AbstractMapOutputFormat {
     }
 
     /**
-     * @param the mime type to be written down as an HTTP header when a map of this format is
+     * @param mime the mime type to be written down as an HTTP header when a map of this format is
      *     generated
      */
     public RenderedImageMapOutputFormat(String mime, WMS wms) {
@@ -448,8 +459,26 @@ public class RenderedImageMapOutputFormat extends AbstractMapOutputFormat {
         // turn on advanced projection handling
         if (wms.isAdvancedProjectionHandlingEnabled()) {
             rendererParams.put(StreamingRenderer.ADVANCED_PROJECTION_HANDLING_KEY, true);
+            if (request.getFormatOptions().get(ADV_PROJECTION_DENSIFICATION_FORMAT_OPTION)
+                    != null) {
+                rendererParams.put(
+                        StreamingRenderer.ADVANCED_PROJECTION_DENSIFICATION_KEY,
+                        getFormatOptionAsBoolean(
+                                request, ADV_PROJECTION_DENSIFICATION_FORMAT_OPTION));
+            } else if (wms.isAdvancedProjectionDensificationEnabled()) {
+                rendererParams.put(StreamingRenderer.ADVANCED_PROJECTION_DENSIFICATION_KEY, true);
+            }
             if (wms.isContinuousMapWrappingEnabled()) {
                 rendererParams.put(StreamingRenderer.CONTINUOUS_MAP_WRAPPING, true);
+            }
+            if (request.getFormatOptions().get(DISABLE_DATELINE_WRAPPING_HEURISTIC_FORMAT_OPTION)
+                    != null) {
+                rendererParams.put(
+                        StreamingRenderer.DATELINE_WRAPPING_HEURISTIC_KEY,
+                        !getFormatOptionAsBoolean(
+                                request, DISABLE_DATELINE_WRAPPING_HEURISTIC_FORMAT_OPTION));
+            } else if (wms.isDateLineWrappingHeuristicDisabled()) {
+                rendererParams.put(StreamingRenderer.DATELINE_WRAPPING_HEURISTIC_KEY, false);
             }
         }
 
@@ -1052,23 +1081,25 @@ public class RenderedImageMapOutputFormat extends AbstractMapOutputFormat {
                 final CoordinateReferenceSystem coverageCRS =
                         layer.getFeatureSource().getSchema().getCoordinateReferenceSystem();
                 final GridGeometry2D readGG;
-                final boolean equalsMetadata = CRS.equalsIgnoreMetadata(mapCRS, coverageCRS);
-                boolean sameCRS;
-                try {
-                    sameCRS =
-                            equalsMetadata
-                                    || CRS.findMathTransform(mapCRS, coverageCRS, true)
-                                            .isIdentity();
-                } catch (FactoryException e1) {
-                    final IOException ioe = new IOException();
-                    ioe.initCause(e1);
-                    throw ioe;
+                boolean useGutter = !DISABLE_GUTTER;
+                if (useGutter) {
+                    final boolean equalsMetadata = CRS.equalsIgnoreMetadata(mapCRS, coverageCRS);
+                    boolean sameCRS;
+                    try {
+                        sameCRS =
+                                equalsMetadata
+                                        || CRS.findMathTransform(mapCRS, coverageCRS, true)
+                                                .isIdentity();
+                    } catch (FactoryException e1) {
+                        final IOException ioe = new IOException();
+                        ioe.initCause(e1);
+                        throw ioe;
+                    }
+                    useGutter = !sameCRS || !(interpolation instanceof InterpolationNearest);
                 }
-                final boolean needsGutter =
-                        !sameCRS || !(interpolation instanceof InterpolationNearest);
-                if (!needsGutter) {
-                    readGG = new GridGeometry2D(new GridEnvelope2D(mapRasterArea), mapEnvelope);
 
+                if (!useGutter) {
+                    readGG = new GridGeometry2D(new GridEnvelope2D(mapRasterArea), mapEnvelope);
                 } else {
                     //
                     // SG added gutter to the drawing. We need to investigate much more and also we
@@ -1467,6 +1498,12 @@ public class RenderedImageMapOutputFormat extends AbstractMapOutputFormat {
                 image = iw.getRenderedImage();
             }
         }
+        if (LOGGER.isLoggable(Level.FINE) && image != null) {
+            LOGGER.log(
+                    Level.FINE,
+                    "Direct rendering path produced the following image chain:\n"
+                            + RenderedImageBrowser.dumpChain(image));
+        }
         return image;
     }
 
@@ -1485,7 +1522,7 @@ public class RenderedImageMapOutputFormat extends AbstractMapOutputFormat {
         if (roiCandidate instanceof ROI) {
             ROI imageROI = (ROI) roiCandidate;
             try {
-                roi = imageROI.intersect(new ROIGeometry(mapRasterArea));
+                roi = new ROIGeometry(mapRasterArea).intersect(imageROI);
             } catch (IllegalArgumentException e) {
                 // in the unlikely event that the ROI does not intersect the target map
                 // area an exception will be thrown. Catching the exception instead of checking

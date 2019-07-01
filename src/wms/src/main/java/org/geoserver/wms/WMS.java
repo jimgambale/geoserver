@@ -78,6 +78,7 @@ import org.geotools.util.Converters;
 import org.geotools.util.DateRange;
 import org.geotools.util.NumberRange;
 import org.geotools.util.Range;
+import org.geotools.util.SuppressFBWarnings;
 import org.geotools.util.Version;
 import org.geotools.util.decorate.Wrapper;
 import org.geotools.util.factory.GeoTools;
@@ -204,6 +205,27 @@ public class WMS implements ApplicationContextAware {
 
     /** Advanced projection key */
     public static String ADVANCED_PROJECTION_KEY = "advancedProjectionHandling";
+
+    /** Enable advanced projection handling */
+    public static Boolean ENABLE_ADVANCED_PROJECTION_DENSIFICATION = false;
+
+    /** Advanced projection densification key */
+    public static String ADVANCED_PROJECTION_DENSIFICATION_KEY = "advancedProjectionDensification";
+
+    /** Disable DateLine Wrapping Heuristic. */
+    public static Boolean DISABLE_DATELINE_WRAPPING_HEURISTIC = false;
+
+    /** DateLine Wrapping Heuristic key */
+    public static String DATELINE_WRAPPING_HEURISTIC_KEY = "disableDatelineWrappingHeuristic";
+
+    /**
+     * Capabilities will be produced with a root Layer element, only when needed (there is no single
+     * top layer element) *
+     */
+    public static Boolean ROOT_LAYER_IN_CAPABILITIES_DEFAULT = true;
+
+    /** Root Layer in Capabilities key * */
+    public static String ROOT_LAYER_IN_CAPABILITIES_KEY = "rootLayerInCapabilities";
 
     /** GIF disposal methods */
     public static final String DISPOSAL_METHOD_NONE = "none";
@@ -548,6 +570,29 @@ public class WMS implements ApplicationContextAware {
         return enabled;
     }
 
+    public boolean isAdvancedProjectionDensificationEnabled() {
+        Boolean enabled =
+                getMetadataValue(
+                        ADVANCED_PROJECTION_DENSIFICATION_KEY,
+                        ENABLE_ADVANCED_PROJECTION_DENSIFICATION,
+                        Boolean.class);
+        return enabled;
+    }
+
+    public boolean isDateLineWrappingHeuristicDisabled() {
+        Boolean disabled =
+                getMetadataValue(
+                        DATELINE_WRAPPING_HEURISTIC_KEY,
+                        DISABLE_DATELINE_WRAPPING_HEURISTIC,
+                        Boolean.class);
+        return disabled;
+    }
+
+    public boolean isRootLayerInCapabilitesEnabled() {
+        return getMetadataValue(
+                ROOT_LAYER_IN_CAPABILITIES_KEY, ROOT_LAYER_IN_CAPABILITIES_DEFAULT, Boolean.class);
+    }
+
     public int getMaxAllowedFrames() {
         return getMetadataValue(MAX_ALLOWED_FRAMES, MAX_ALLOWED_FRAMES_DEFAULT, Integer.class);
     }
@@ -687,7 +732,6 @@ public class WMS implements ApplicationContextAware {
      * Grabs the list of allowed MIME-Types for the GetMap operation from the set of {@link
      * GetMapOutputFormat}s registered in the application context.
      *
-     * @param applicationContext The application context where to grab the GetMapOutputFormats from.
      * @see GetMapOutputFormat#getContentType()
      */
     public Set<String> getAvailableMapFormatNames() {
@@ -787,10 +831,7 @@ public class WMS implements ApplicationContextAware {
         return WMSExtensions.findExtendedCapabilitiesProviders(applicationContext);
     }
 
-    /**
-     * @see
-     *     org.springframework.context.ApplicationContextAware#setApplicationContext(org.springframework.context.ApplicationContext)
-     */
+    @SuppressFBWarnings("LI_LAZY_INIT_STATIC") // method is not called by multiple threads
     public void setApplicationContext(final ApplicationContext applicationContext)
             throws BeansException {
         this.applicationContext = applicationContext;
@@ -1034,27 +1075,6 @@ public class WMS implements ApplicationContextAware {
     /**
      * Returns the read parameters for the specified layer, merging some well known request
      * parameters into the read parameters if possible
-     *
-     * @deprecated Use {@link #getWMSReadParameters(GetMapRequest, MapLayerInfo, Filter, SortBy[],
-     *     List, List, GridCoverage2DReader, boolean)} instead
-     */
-    @Deprecated
-    public GeneralParameterValue[] getWMSReadParameters(
-            final GetMapRequest request,
-            final MapLayerInfo mapLayerInfo,
-            final Filter layerFilter,
-            final List<Object> times,
-            final List<Object> elevations,
-            final GridCoverage2DReader reader,
-            boolean readGeom)
-            throws IOException {
-        return getWMSReadParameters(
-                request, mapLayerInfo, layerFilter, null, times, elevations, reader, readGeom);
-    }
-
-    /**
-     * Returns the read parameters for the specified layer, merging some well known request
-     * parameters into the read parameters if possible
      */
     public GeneralParameterValue[] getWMSReadParameters(
             final GetMapRequest request,
@@ -1236,7 +1256,7 @@ public class WMS implements ApplicationContextAware {
         DimensionInfo time = coverage.getMetadata().get(ResourceInfo.TIME, DimensionInfo.class);
         if (time == null || !time.isEnabled()) {
             throw new ServiceException(
-                    "Layer " + coverage.getPrefixedName() + " does not have time support enabled");
+                    "Layer " + coverage.prefixedName() + " does not have time support enabled");
         }
 
         GridCoverage2DReader reader = null;

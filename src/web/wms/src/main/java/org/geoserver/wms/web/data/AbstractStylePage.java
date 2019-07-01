@@ -68,6 +68,7 @@ import org.geoserver.catalog.DataStoreInfo;
 import org.geoserver.catalog.LayerInfo;
 import org.geoserver.catalog.ResourceInfo;
 import org.geoserver.catalog.ResourcePool;
+import org.geoserver.catalog.SLDHandler;
 import org.geoserver.catalog.SLDNamedLayerValidator;
 import org.geoserver.catalog.StyleHandler;
 import org.geoserver.catalog.StyleInfo;
@@ -469,8 +470,9 @@ public abstract class AbstractStylePage extends GeoServerSecuredPage {
                                 try {
                                     tabPanel =
                                             panelClass
-                                                    .getConstructor(String.class, IModel.class)
-                                                    .newInstance(panelId, styleModel);
+                                                    .getConstructor(
+                                                            String.class, AbstractStylePage.class)
+                                                    .newInstance(panelId, AbstractStylePage.this);
                                 } catch (Exception e) {
                                     throw new WicketRuntimeException(e);
                                 }
@@ -553,69 +555,78 @@ public abstract class AbstractStylePage extends GeoServerSecuredPage {
         GeoServerDialog dialog = new GeoServerDialog("dialog");
         dialog.setOutputMarkupId(true);
         add(dialog);
-        GeoServerDialog.DialogDelegate imagePanelDelegate =
-                new GeoServerDialog.DialogDelegate() {
-
-                    private ChooseImagePanel imagePanel;
-
-                    @Override
-                    protected Component getContents(String id) {
-                        return imagePanel =
-                                new ChooseImagePanel(id, styleModel.getObject().getWorkspace());
-                    }
-
-                    @Override
-                    protected boolean onSubmit(AjaxRequestTarget target, Component contents) {
-                        String imageFileName = imagePanel.getChoice();
-                        if (Strings.isEmpty(imageFileName)) {
-                            FileUpload fu = imagePanel.getFileUpload();
-                            imageFileName = fu.getClientFileName();
-                            int teller = 0;
-                            GeoServerDataDirectory dd =
-                                    GeoServerApplication.get()
-                                            .getBeanOfType(GeoServerDataDirectory.class);
-                            Resource res = dd.getStyles(style.getWorkspace(), imageFileName);
-                            while (Resources.exists(res)) {
-                                imageFileName =
-                                        FilenameUtils.getBaseName(fu.getClientFileName())
-                                                + "."
-                                                + (++teller)
-                                                + "."
-                                                + FilenameUtils.getExtension(
-                                                        fu.getClientFileName());
-                                res = dd.getStyles(style.getWorkspace(), imageFileName);
-                            }
-                            try (InputStream is = fu.getInputStream()) {
-                                try (OutputStream os = res.out()) {
-                                    IOUtils.copy(is, os);
-                                }
-                            } catch (IOException e) {
-                                error(e.getMessage());
-                                target.add(imagePanel.getFeedback());
-                                return false;
-                            }
-                        }
-                        target.appendJavaScript(
-                                "replaceSelection('"
-                                        + styleHandler().insertImageCode(imageFileName)
-                                        + "');");
-                        return true;
-                    }
-
-                    @Override
-                    public void onError(AjaxRequestTarget target, Form<?> form) {
-                        target.add(imagePanel.getFeedback());
-                    }
-                };
         editor.addCustomButton(
                 new ParamResourceModel("insertImage", getPage()).getString(),
                 "button-picture",
                 target -> {
+                    String input = editor.getInput();
                     dialog.setTitle(new ParamResourceModel("insertImage", getPage()));
                     dialog.setInitialWidth(385);
                     dialog.setInitialHeight(175);
 
-                    dialog.showOkCancel(target, imagePanelDelegate);
+                    dialog.showOkCancel(
+                            target,
+                            new GeoServerDialog.DialogDelegate() {
+
+                                private ChooseImagePanel imagePanel;
+
+                                @Override
+                                protected Component getContents(String id) {
+                                    return imagePanel =
+                                            new ChooseImagePanel(
+                                                    id, styleModel.getObject().getWorkspace());
+                                }
+
+                                @Override
+                                protected boolean onSubmit(
+                                        AjaxRequestTarget target, Component contents) {
+                                    String imageFileName = imagePanel.getChoice();
+                                    if (Strings.isEmpty(imageFileName)) {
+                                        FileUpload fu = imagePanel.getFileUpload();
+                                        imageFileName = fu.getClientFileName();
+                                        int teller = 0;
+                                        GeoServerDataDirectory dd =
+                                                GeoServerApplication.get()
+                                                        .getBeanOfType(
+                                                                GeoServerDataDirectory.class);
+                                        Resource res =
+                                                dd.getStyles(
+                                                        styleModel.getObject().getWorkspace(),
+                                                        imageFileName);
+                                        while (Resources.exists(res)) {
+                                            imageFileName =
+                                                    FilenameUtils.getBaseName(
+                                                                    fu.getClientFileName())
+                                                            + "."
+                                                            + (++teller)
+                                                            + "."
+                                                            + FilenameUtils.getExtension(
+                                                                    fu.getClientFileName());
+                                            res = dd.getStyles(style.getWorkspace(), imageFileName);
+                                        }
+                                        try (InputStream is = fu.getInputStream()) {
+                                            try (OutputStream os = res.out()) {
+                                                IOUtils.copy(is, os);
+                                            }
+                                        } catch (IOException e) {
+                                            error(e.getMessage());
+                                            target.add(imagePanel.getFeedback());
+                                            return false;
+                                        }
+                                    }
+                                    target.appendJavaScript(
+                                            "replaceSelection('"
+                                                    + styleHandler()
+                                                            .insertImageCode(imageFileName, input)
+                                                    + "');");
+                                    return true;
+                                }
+
+                                @Override
+                                public void onError(AjaxRequestTarget target, Form<?> form) {
+                                    target.add(imagePanel.getFeedback());
+                                }
+                            });
                 });
 
         editor.addCustomButton(
@@ -744,6 +755,9 @@ public abstract class AbstractStylePage extends GeoServerSecuredPage {
 
     StyleHandler styleHandler() {
         String format = styleModel.getObject().getFormat();
+        if (format == null) {
+            return Styles.handler(SLDHandler.FORMAT);
+        }
         return Styles.handler(format);
     }
 
@@ -867,7 +881,7 @@ public abstract class AbstractStylePage extends GeoServerSecuredPage {
 
         // The problem only exists for styles with an "sld" format (either explicitly or by
         // default).
-        if ("sld".equalsIgnoreCase(si.getFormat())) {
+        if ("sld".equalsIgnoreCase(si.getFormat()) || si.getFormat() == null) {
             String filename = si.getFilename();
             String filenameCss = filename.substring(0, filename.lastIndexOf('.')) + ".css";
             GeoServerDataDirectory dataDir =
